@@ -44,23 +44,26 @@ impl Connection {
     /// Send message to peer using a uni-directional stream.
     pub async fn send_uni(&self, msg: Bytes) -> Result<()> {
         let mut send_stream = self.handle_error(self.quic_conn.open_uni().await)?;
-        self.handle_error(send_msg(&mut send_stream, msg).await)?;
+        self.handle_error(send_msg(&mut send_stream, msg).await)
 
-        // We try to make sure the stream is gracefully closed and the bytes get sent,
-        // but if it was already closed (perhaps by the peer) then we
-        // don't remove the connection from the pool.
-        match send_stream.finish().await {
-            Ok(()) | Err(quinn::WriteError::Stopped(_)) => Ok(()),
-            Err(err) => {
-                self.handle_error(Err(err))?;
-                Ok(())
-            }
-        }
+        // // We try to make sure the stream is gracefully closed and the bytes get sent,
+        // // but if it was already closed (perhaps by the peer) then we
+        // // don't remove the connection from the pool.
+        // trace!("trying to finish send stream..");
+        // match send_stream.finish().await {
+        //     Ok(()) | Err(quinn::WriteError::Stopped(_)) => Ok(()),
+        //     Err(err) => {
+        //         self.handle_error(Err(err))?;
+        //         Ok(())
+        //     }
+        // }
     }
 
     fn handle_error<T, E>(&self, result: Result<T, E>) -> Result<T, E> {
         if result.is_err() {
-            self.remover.remove()
+            trace!("handling error, removing..");
+            self.remover.remove();
+            trace!("removed");
         }
 
         result
@@ -201,7 +204,12 @@ pub(super) fn listen_for_incoming_messages(
                 // When the message in handled internally we return Bytes::new() to prevent
                 // connection termination
                 if !message.is_empty() {
-                    let _ = message_tx.send((src, message));
+                    match message_tx.send((src, message)) {
+                        Ok(()) => log::trace!("'message_tx.send' ok"),
+                        Err(e) => log::error!("'message_tx.send' error: {}", e),
+                    }
+                } else {
+                    log::trace!("empty message");
                 }
             } else {
                 log::trace!("The connection has been terminated.");
